@@ -1,0 +1,137 @@
+---
+title: "Prediction Assignment RMarkdown"
+author: "Henry"
+date: "19 September 2019"
+output: html_document
+---
+
+##Introduction
+
+The aim of the analysis is to build a model that can predict how well some people have performed a certain exercise. There is one **train** dataset that has many predictors and the "classe" of the exercise, and another much smaller **test** data set that is missing the class. The train dataset will be used to build and assess the model. The test will be **unseen** in the eyes of the model and so will not feedback into the model build. It is worth mentioning that the person who performed the exercise is a field and is used in a model, and so this model couldn't be extended to further people/data without some edits.
+
+##Data Exploration
+
+The first step is to set up any libraries required for my analysis and read in ther two data sets.
+
+```{r data, cache=TRUE}
+library(ggplot2); library(dplyr); library(purrr); library(tidyr)
+library(corrplot); library(ISLR); library(caret);
+
+train <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", 
+                  header=TRUE, na.strings=c("",".","NA","#DIV/0!"))
+test <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", 
+                  header=TRUE, na.strings=c("",".","NA","#DIV/0!"))
+```
+
+Next, I look at a few overall aspects of the data like what fields exist, what does the data look like, and are there many unknowns to deal with.
+
+```{r dataanalysis, cache=TRUE}
+head(train,3)
+table(is.na(train))
+```
+
+There are a large number of unknowns. The following script loops through all the variables are creates a list of any that have greater than 95% missing. These fields can be dropped from further analysis as they won't add much to a model. The list also includes the **timestamp** variables as I do not feel that they should have an interpretable fit, and they may differ between train and test.
+
+```{r droplist, cache=TRUE}
+#Get the total number of observations
+obs <- as.numeric(length(train[,1]))
+#Create small list with time fields
+DropList <- c("raw_timestamp_part_1","raw_timestamp_part_2","cvtd_timestamp")
+#Add to list any fields with more than 95% missing
+for (i in names(train)) {
+    ratio <- eval(parse(text = paste("as.numeric(table(is.na(train$",
+                                     i,"))['TRUE'])/obs")))
+    ratio <- max(ratio,0.1)
+    if (ratio > 0.95 && !is.na(ratio)) { DropList = c(DropList,i)}
+}
+#Check missing of remaining fields
+table(is.na(select(train,-DropList)))
+```
+
+By removing those variables in the list, I have eliminated all unknown values in the data. The number of fields is also reduced so analysis and model fitting is easier.  
+
+Finally, I will look at the distributions of the remaining variables to see if there is any further data prep required for the model build.
+
+```{r distr, cache=TRUE, fig.width = 20, fig.height=10}
+# Check numeric and factor variables look reasonable
+select(train,-DropList) %>%
+    keep(is.numeric) %>%
+    gather() %>% 
+    ggplot(aes(value)) +
+    facet_wrap(~ key, scales = "free") +
+    geom_histogram()
+select(train,-DropList) %>%
+    keep(is.factor) %>%
+    gather() %>% 
+    ggplot(aes(value)) +
+    facet_wrap(~ key, scales = "free") +
+    geom_bar()
+```
+
+##Model Build
+
+After the data exploration and field reduction, it is now time build a model. The train data provided needs to be split into two groups. One of these groupes will be used to create the model, and the other will be used to assess the accuracy of the model on data other than which it was built. A 70:20 observation split was chosen for the train:validate.
+
+```{r trainval, cache=TRUE}
+set.seed(123) #set seed so split is reproducable
+inTrain <- createDataPartition(y=train$classe, p=0.7, list=FALSE)
+Train2Model <- select(train,-DropList)[inTrain,]
+Validate<- select(train,-DropList)[-inTrain,]
+```
+
+I have chosen to fit a random fores as I feel it is the best at this sort of classification problem without much overfitting or excess model fit time.
+
+```{r model, cache=TRUE}
+set.seed(1234) #set seed so model is reproducable
+ModelRF <- train(classe~., data=Train2Model, method="rf")
+```
+
+As a sense check, I see how the model fits the train data it was built off. This is a perfect fit so does not suggest any error in the model.
+
+```{r trainfit, cache=TRUE}
+TrainPredict <- predict(ModelRF,Train2Model)
+table(TrainPredict,Train2Model$classe)
+```
+
+##Results
+
+I have looked at how well the model fits for the validate data as I can compare this to the actual. I also looked at the test data fit but I don't have the **classe** variable to check the fit with.
+
+###Validate
+
+The model fits the validate data with all but one observation, an accuaracy of 99.9%.
+
+```{r valfit, cache=TRUE}
+ValPredict <- predict(ModelRF,Validate)
+table(ValPredict,Validate$classe)
+```
+
+###Test
+
+The test data analysis looks reasonable, so the data appears suitable to be fitted with a model built on train data.
+The predictions are below.
+
+```{r testfit, cache=TRUE}
+#Check missing volumes and variables look similar on test data
+table(is.na(select(test,-DropList)))
+select(test,-DropList) %>%
+    keep(is.numeric) %>%
+    gather() %>% 
+    ggplot(aes(value)) +
+    facet_wrap(~ key, scales = "free") +
+    geom_histogram()
+select(test,-DropList) %>%
+    keep(is.factor) %>%
+    gather() %>% 
+    ggplot(aes(value)) +
+    facet_wrap(~ key, scales = "free") +
+    geom_bar()
+predict(ModelRF,test)
+```
+
+##Conclusion
+
+The random forest model built appears to be very accurate, so no other model types or ensembles were attempted.
+The data analysis was largely limited to removing unknowns, however this unknown data could be accounted for with a binary field accompanying each variable. This and other feature engineering were not attempted. Correlations were looked at but no action taken on them so notincluded in this report. Tweaks to the model and other models were not considered. With more time and a larger project, these would have gone into the analysis. 
+
+
